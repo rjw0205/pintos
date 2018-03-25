@@ -144,4 +144,7 @@ int thread_get_load_avg (void);
 /* Depends which thread has smaller time_to_wake_up */
 bool thread_wake_up_tick_is_smaller(const struct list_elem *, const struct list_elem *, void *);
 
+/* Depends which thread has bigger priority */
+bool thread_priority_is_bigger(const struct list_elem *, const struct list_elem *, void *);
+
 #endif /* threads/thread.h */

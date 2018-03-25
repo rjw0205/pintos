@@ -11,7 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
-#include "lib/kernel/list.h" // I added
+#include "lib/kernel/list.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -246,8 +246,15 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, thread_priority_is_bigger, NULL);
   t->status = THREAD_READY;
+
+  if(idle_thread != thread_current()){
+    if(t->priority > thread_current()->priority){
+      thread_yield();
+    }
+  }
+
   intr_set_level (old_level);
 }
 
@@ -316,8 +323,8 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+    list_insert_ordered(&ready_list, &cur->elem, thread_priority_is_bigger, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -345,6 +352,10 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_yield();
+  // if(new_priority < list_entry(list_max(&ready_list, thread_priority_is_bigger, NULL), struct thread, elem)->priority){
+  //   thread_yield();
+  // }
 }
 
 /* Returns the current thread's priority. */
@@ -392,6 +403,15 @@ thread_wake_up_tick_is_smaller(const struct list_elem *first_elem, const struct 
   struct thread *first_thread = list_entry(first_elem, struct thread, elem);
   struct thread *second_thread = list_entry(second_elem, struct thread, elem);
   return first_thread->time_to_wake_up < second_thread->time_to_wake_up;
+}
+
+/* Depends which thread has bigger priority */
+bool
+thread_priority_is_bigger(const struct list_elem *first_elem, const struct list_elem *second_elem, void *aux)
+{
+  struct thread *first_thread = list_entry(first_elem, struct thread, elem);
+  struct thread *second_thread = list_entry(second_elem, struct thread, elem);
+  return first_thread->priority > second_thread->priority;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
