@@ -69,7 +69,9 @@ sema_down (struct semaphore *sema)
   while (sema->value == 0) 
     {
       //list_push_back (&sema->waiters, &thread_current ()->elem);
-      list_insert_ordered (&sema->waiters, &thread_current ()->elem, thread_priority_is_bigger, NULL);
+      list_insert_ordered(&sema->waiters, &thread_current ()->elem, thread_priority_is_bigger, NULL);
+      //printf("%d\n", list_entry(list_begin(&sema->waiters), struct thread, elem)->priority);
+      //printf("%zd\n", list_size(&sema->waiters));
       thread_block ();
     }
   sema->value--;
@@ -114,7 +116,7 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  //list_sort(&sema->waiters, thread_priority_is_bigger, NULL);
+  list_sort(&sema->waiters, thread_priority_is_bigger, NULL);
   sema->value++;
   if (!list_empty (&sema->waiters))
     thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
@@ -180,6 +182,7 @@ lock_init (struct lock *lock)
   ASSERT (lock != NULL);
 
   lock->holder = NULL;
+  lock->largest_priority = 0;
   sema_init (&lock->semaphore, 1);
 }
 
@@ -198,8 +201,44 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  if(lock->holder != NULL){
+    if(lock->holder->priority < thread_current()->priority){
+      lock->holder->priority = thread_current()->priority;
+    }
+  }
+
+  if(lock->holder == NULL){
+    lock->largest_priority = thread_current()->priority;
+  }
+  else {
+    if(lock->largest_priority < thread_current()->priority){
+      lock->largest_priority = thread_current()->priority;
+    }
+  }
+
   sema_down (&lock->semaphore);
+
   lock->holder = thread_current ();
+
+
+  /////////  TEST  ///////////
+  // if(list_size(&lock->semaphore.waiters) == 0){
+  //   //printf("AA : %d %d\n", lock->largest_priority, thread_current()->priority);
+  //   printf("holder lock name : %s\n", lock->holder->name);
+  //   lock->largest_priority = thread_current()->priority;
+  // }
+  // else {
+  //   //printf("BB : %d\n", thread_current()->priority);
+  //   if(list_entry(list_begin(&lock->semaphore.waiters), struct thread, elem)->priority > lock->largest_priority){
+  //     lock->largest_priority = list_entry(list_begin(&lock->semaphore.waiters), struct thread, elem)->priority;
+  //   }
+  // }
+
+  list_insert_ordered(&lock->holder->lock_list_which_thread_hold, &lock->elem, lock_priority_is_bigger, NULL);
+  //////////  TEST  ///////////
+
+
+
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -232,6 +271,18 @@ lock_release (struct lock *lock)
 {
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
+
+  //lock->holder->priority = lock->holder->priority_before_donation;
+
+  //// TEST ////
+  list_remove(&lock->elem);
+  if(list_size(&lock->holder->lock_list_which_thread_hold) == 0 ){
+    lock->holder->priority = lock->holder->priority_before_donation;
+  }
+  else {
+    lock->holder->priority = list_entry(list_begin(&lock->holder->lock_list_which_thread_hold), struct lock, elem)->largest_priority;
+  }
+  //// TEST ////
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
@@ -337,4 +388,12 @@ cond_broadcast (struct condition *cond, struct lock *lock)
 
   while (!list_empty (&cond->waiters))
     cond_signal (cond, lock);
+}
+
+bool
+lock_priority_is_bigger(const struct list_elem *first_elem, const struct list_elem *second_elem, void *aux)
+{
+  struct lock *first_lock = list_entry(first_elem, struct lock, elem);
+  struct lock *second_lock = list_entry(second_elem, struct lock, elem);
+  return first_lock->largest_priority > second_lock->largest_priority;
 }

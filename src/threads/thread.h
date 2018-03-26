@@ -100,6 +100,12 @@ struct thread
 
     /* Used in devices/timer.c -> timer_sleep() */
     int64_t time_to_wake_up;            /* Store time ticks which thread must wake up */
+
+    /* Used in synch.c */
+    int priority_before_donation;       /* Store it's undonated priority */
+
+    /* Used in synch.c */
+    struct list lock_list_which_thread_hold; /* store lock*/
     
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
