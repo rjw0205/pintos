@@ -105,7 +105,10 @@ struct thread
     int priority_before_donation;       /* Store it's undonated priority */
 
     /* Used in synch.c */
-    struct list lock_list_which_thread_hold; /* store lock*/
+    struct list lock_list_which_thread_hold; /* store lock list which thread is owning */
+
+    /* Used in synch.c */
+    struct lock *lock_which_thread_waiting; /* store lock which thread is waiting */
     
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

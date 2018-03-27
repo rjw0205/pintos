@@ -68,10 +68,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      //list_push_back (&sema->waiters, &thread_current ()->elem);
       list_insert_ordered(&sema->waiters, &thread_current ()->elem, thread_priority_is_bigger, NULL);
-      //printf("%d\n", list_entry(list_begin(&sema->waiters), struct thread, elem)->priority);
-      //printf("%zd\n", list_size(&sema->waiters));
       thread_block ();
     }
   sema->value--;
@@ -118,9 +115,9 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
   list_sort(&sema->waiters, thread_priority_is_bigger, NULL);
   sema->value++;
-  if (!list_empty (&sema->waiters))
+  if (!list_empty (&sema->waiters)){
     thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
-  // sema->value++;
+  }
   intr_set_level (old_level);
 }
 
@@ -197,13 +194,22 @@ lock_init (struct lock *lock)
 void
 lock_acquire (struct lock *lock)
 {
+  enum intr_level old_level;
+
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
+  old_level = intr_disable ();
+
+  thread_current()->lock_which_thread_waiting = lock;
+
   if(lock->holder != NULL){
     if(lock->holder->priority < thread_current()->priority){
       lock->holder->priority = thread_current()->priority;
+    }
+    if(lock->holder->lock_which_thread_waiting != NULL){
+      lock->holder->lock_which_thread_waiting->holder->priority = thread_current()->priority;
     }
   }
 
@@ -215,30 +221,14 @@ lock_acquire (struct lock *lock)
       lock->largest_priority = thread_current()->priority;
     }
   }
-
   sema_down (&lock->semaphore);
-
+  
   lock->holder = thread_current ();
-
-
-  /////////  TEST  ///////////
-  // if(list_size(&lock->semaphore.waiters) == 0){
-  //   //printf("AA : %d %d\n", lock->largest_priority, thread_current()->priority);
-  //   printf("holder lock name : %s\n", lock->holder->name);
-  //   lock->largest_priority = thread_current()->priority;
-  // }
-  // else {
-  //   //printf("BB : %d\n", thread_current()->priority);
-  //   if(list_entry(list_begin(&lock->semaphore.waiters), struct thread, elem)->priority > lock->largest_priority){
-  //     lock->largest_priority = list_entry(list_begin(&lock->semaphore.waiters), struct thread, elem)->priority;
-  //   }
-  // }
+  lock->holder->lock_which_thread_waiting = NULL;
 
   list_insert_ordered(&lock->holder->lock_list_which_thread_hold, &lock->elem, lock_priority_is_bigger, NULL);
-  //////////  TEST  ///////////
 
-
-
+  intr_set_level (old_level);
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -272,9 +262,6 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  //lock->holder->priority = lock->holder->priority_before_donation;
-
-  //// TEST ////
   list_remove(&lock->elem);
   if(list_size(&lock->holder->lock_list_which_thread_hold) == 0 ){
     lock->holder->priority = lock->holder->priority_before_donation;
@@ -282,7 +269,6 @@ lock_release (struct lock *lock)
   else {
     lock->holder->priority = list_entry(list_begin(&lock->holder->lock_list_which_thread_hold), struct lock, elem)->largest_priority;
   }
-  //// TEST ////
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);

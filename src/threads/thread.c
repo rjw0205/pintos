@@ -175,9 +175,12 @@ thread_create (const char *name, int priority,
   enum intr_level old_level;
 
   ASSERT (function != NULL);
+  //printf("CCC\n");
 
   /* Allocate thread. */
+  //printf("BEFORE: %s %d\n", thread_name(), thread_get_priority());
   t = palloc_get_page (PAL_ZERO);
+  //printf("AFTER: %s %d\n", thread_name(), thread_get_priority());
   if (t == NULL)
     return TID_ERROR;
 
@@ -206,6 +209,7 @@ thread_create (const char *name, int priority,
   sf->ebp = 0;
 
   intr_set_level (old_level);
+
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -351,7 +355,13 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+  if(thread_current()->priority > thread_current()->priority_before_donation){
+    thread_current()->priority_before_donation = new_priority;
+  }
+  else {
+    thread_current ()->priority = new_priority;
+  }
+
   thread_yield();
   // if(new_priority < list_entry(list_max(&ready_list, thread_priority_is_bigger, NULL), struct thread, elem)->priority){
   //   thread_yield();
@@ -457,6 +467,7 @@ static void
 kernel_thread (thread_func *function, void *aux) 
 {
   ASSERT (function != NULL);
+  //printf("DDD\n");
 
   intr_enable ();       /* The scheduler runs with interrupts off. */
   function (aux);       /* Execute the thread function. */
@@ -500,6 +511,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority = priority;
   t->priority_before_donation = priority;
   list_init(&t->lock_list_which_thread_hold);
+  t->lock_which_thread_waiting = NULL;
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
