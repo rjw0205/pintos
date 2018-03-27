@@ -208,9 +208,18 @@ lock_acquire (struct lock *lock)
     if(lock->holder->priority < thread_current()->priority){
       lock->holder->priority = thread_current()->priority;
     }
-    if(lock->holder->lock_which_thread_waiting != NULL){
-      lock->holder->lock_which_thread_waiting->holder->priority = thread_current()->priority;
+
+    // if(lock->holder->lock_which_thread_waiting != NULL){
+    //   lock->holder->lock_which_thread_waiting->holder->priority = thread_current()->priority;
+    // }
+
+    /// TEST ///
+    struct lock *waiting_lock = lock->holder->lock_which_thread_waiting;
+    while(waiting_lock != NULL){
+      waiting_lock->holder->priority = thread_current()->priority;
+      waiting_lock = waiting_lock->holder->lock_which_thread_waiting;
     }
+    /// TEST ///
   }
 
   if(lock->holder == NULL){

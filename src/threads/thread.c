@@ -178,9 +178,8 @@ thread_create (const char *name, int priority,
   //printf("CCC\n");
 
   /* Allocate thread. */
-  //printf("BEFORE: %s %d\n", thread_name(), thread_get_priority());
   t = palloc_get_page (PAL_ZERO);
-  //printf("AFTER: %s %d\n", thread_name(), thread_get_priority());
+  
   if (t == NULL)
     return TID_ERROR;
 
@@ -358,14 +357,15 @@ thread_set_priority (int new_priority)
   if(thread_current()->priority > thread_current()->priority_before_donation){
     thread_current()->priority_before_donation = new_priority;
   }
+  else if(thread_current()->priority ==  thread_current()->priority_before_donation){
+    thread_current()->priority_before_donation = new_priority;
+    thread_current()->priority = new_priority;
+  }
   else {
     thread_current ()->priority = new_priority;
   }
 
   thread_yield();
-  // if(new_priority < list_entry(list_max(&ready_list, thread_priority_is_bigger, NULL), struct thread, elem)->priority){
-  //   thread_yield();
-  // }
 }
 
 /* Returns the current thread's priority. */
