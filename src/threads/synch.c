@@ -343,7 +343,10 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+
+  waiter.semaphore.sema_priority = thread_current()->priority;
+  list_insert_ordered(&cond->waiters, &waiter.elem, sema_priority_is_bigger, NULL);
+
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -364,9 +367,10 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
+  list_sort(&cond->waiters, sema_priority_is_bigger, NULL);
+
   if (!list_empty (&cond->waiters)) 
-    sema_up (&list_entry (list_pop_front (&cond->waiters),
-                          struct semaphore_elem, elem)->semaphore);
+    sema_up (&list_entry (list_pop_front (&cond->waiters), struct semaphore_elem, elem)->semaphore);
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -391,4 +395,12 @@ lock_priority_is_bigger(const struct list_elem *first_elem, const struct list_el
   struct lock *first_lock = list_entry(first_elem, struct lock, elem);
   struct lock *second_lock = list_entry(second_elem, struct lock, elem);
   return first_lock->largest_priority > second_lock->largest_priority;
+}
+
+bool
+sema_priority_is_bigger(const struct list_elem *first_elem, const struct list_elem *second_elem, void *aux)
+{
+  struct semaphore_elem *first_sema = list_entry(first_elem, struct semaphore_elem, elem);
+  struct semaphore_elem *second_sema = list_entry(second_elem, struct semaphore_elem, elem);
+  return first_sema->semaphore.sema_priority > second_sema->semaphore.sema_priority;
 }
