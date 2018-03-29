@@ -202,24 +202,25 @@ lock_acquire (struct lock *lock)
 
   old_level = intr_disable ();
 
-  thread_current()->lock_which_thread_waiting = lock;
+  //hread_current()->lock_which_thread_waiting = lock;
+  list_push_front(& thread_current()->lock_which_thread_waiting, &lock->elem_2);
 
   if(lock->holder != NULL){
     if(lock->holder->priority < thread_current()->priority){
       lock->holder->priority = thread_current()->priority;
     }
 
-    // if(lock->holder->lock_which_thread_waiting != NULL){
-    //   lock->holder->lock_which_thread_waiting->holder->priority = thread_current()->priority;
-    // }
-
-    /// TEST ///
-    struct lock *waiting_lock = lock->holder->lock_which_thread_waiting;
-    while(waiting_lock != NULL){
-      waiting_lock->holder->priority = thread_current()->priority;
-      waiting_lock = waiting_lock->holder->lock_which_thread_waiting;
+    struct list_elem *e;
+    for(e = list_begin(&lock->holder->lock_which_thread_waiting); e != list_end(&lock->holder->lock_which_thread_waiting); e = list_next(e)){
+      struct lock *waiting_lock = list_entry(e, struct lock, elem_2);
+      while(waiting_lock->holder != NULL){
+        if(waiting_lock->holder->priority < thread_current()->priority){
+          waiting_lock->holder->priority = thread_current()->priority;
+          waiting_lock->largest_priority = thread_current()->priority;
+        }
+        waiting_lock = list_entry(list_begin(&waiting_lock->holder->lock_which_thread_waiting), struct lock, elem_2);
+      }
     }
-    /// TEST ///
   }
 
   if(lock->holder == NULL){
@@ -233,7 +234,7 @@ lock_acquire (struct lock *lock)
   sema_down (&lock->semaphore);
   
   lock->holder = thread_current ();
-  lock->holder->lock_which_thread_waiting = NULL;
+  list_remove(&lock->elem_2);
 
   list_insert_ordered(&lock->holder->lock_list_which_thread_hold, &lock->elem, lock_priority_is_bigger, NULL);
 

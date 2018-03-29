@@ -108,7 +108,7 @@ struct thread
     struct list lock_list_which_thread_hold; /* store lock list which thread is owning */
 
     /* Used in synch.c */
-    struct lock *lock_which_thread_waiting; /* store lock which thread is waiting */
+    struct list lock_which_thread_waiting; /* store lock's list which thread is waiting */
     
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
