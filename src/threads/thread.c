@@ -209,6 +209,10 @@ thread_create (const char *name, int priority,
 
   intr_set_level (old_level);
 
+  sema_init(&t->wait, 0);
+#ifdef USERPROG
+    //t->wait = thread_current()->wait;                  
+#endif
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -624,6 +628,22 @@ allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+struct thread *
+find_thread_using_tid(tid_t input_tid) {
+  struct list_elem *e;
+
+  for (e = list_begin (&all_list); e != list_end (&all_list);
+       e = list_next (e))
+    {
+
+      struct thread *t = list_entry (e, struct thread, allelem);
+      if(t->tid == input_tid){
+        return t;
+      }
+    }
+    return NULL;
 }
 
 /* Offset of `stack' member within `struct thread'.

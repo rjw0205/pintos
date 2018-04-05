@@ -31,6 +31,8 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
+  // file_name == 'echo x'
+
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -38,12 +40,41 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  char *token, *save_ptr;
+
+  for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+    file_name = token;
+    break;
+  }
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
 }
+/*
+process_execute (const char *file_name) 
+{
+  char *fn_copy;
+  tid_t tid;
+
+  // Make a copy of FILE_NAME.
+  //   Otherwise there's a race between the caller and load(). 
+  fn_copy = palloc_get_page (0);
+  if (fn_copy == NULL)
+    return TID_ERROR;
+  strlcpy (fn_copy, file_name, PGSIZE);
+
+  char * save_ptr;
+  file_name = strtok_r(file_name, " ", &save_ptr);
+
+  // Create a new thread to execute FILE_NAME. 
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+
+  if (tid == TID_ERROR)
+    palloc_free_page (fn_copy); 
+  return tid;
+}*/
 
 /* A thread function that loads a user process and starts it
    running. */
@@ -54,12 +85,63 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  char *parsed_command_storage[100];
+  char *token, *save_ptr;
+  int num = 0;
+
+  for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+    parsed_command_storage[num] = token;
+    num += 1;
+  }
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  int arg_add[num];
+  int arg_len;
+  int arg_len_sum = 0;
+  int idx;
+
+  for (idx=num-1; idx>=0; idx--){
+    arg_len = 1 + strlen(parsed_command_storage[idx]);
+    if_.esp -= arg_len;
+    memcpy(if_.esp, parsed_command_storage[idx], arg_len);
+    arg_add[idx] = if_.esp;
+    arg_len_sum += arg_len;
+  }
+
+  if_.esp += (arg_len_sum % 4) - 4;
+  
+  int j;
+  for(j=0; j< 4 - (arg_len_sum % 4); j++){
+    *((char *)if_.esp + j) = 0;
+  }
+
+  if_.esp -= 4;
+  *(int *)if_.esp = 0;
+
+  int k;
+  for(k = num-1; k >= 0; k--){
+    if_.esp -= 4;
+    *(int *)if_.esp = arg_add[k];
+  }
+
+  if_.esp -= 4;
+  *(int *)if_.esp = (char *) if_.esp +4;
+
+  if_.esp -= 4;
+  *(int *)if_.esp = num;
+
+  if_.esp -= 4;
+  *(int *)if_.esp = 0;
+
+
+  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -75,7 +157,41 @@ start_process (void *file_name_)
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
+/*start_process (void *file_name_)
+{
+  char *file_name = file_name_;
+  struct intr_frame if_;
+  bool success;
 
+  char *token, *save_ptr;
+  char *arg_list[100];
+  int i=0;
+
+  for (token = strtok_r (file_name_, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
+    arg_list[i++] = token;
+
+  // Initialize interrupt frame and load executable. 
+  memset (&if_, 0, sizeof if_);
+  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
+  if_.cs = SEL_UCSEG;
+  if_.eflags = FLAG_IF | FLAG_MBS;
+  success = load (file_name, &if_.eip, &if_.esp);
+
+  // If load failed, quit. 
+  palloc_free_page (file_name);
+  if (!success) 
+    thread_exit ();
+
+  // Start the user process by simulating a return from an
+  //   interrupt, implemented by intr_exit (in
+  //   threads/intr-stubs.S).  Because intr_exit takes all of its
+  //   arguments on the stack in the form of a `struct intr_frame',
+  //   we just point the stack pointer (%esp) to our stack frame
+  //   and jump to it. 
+  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  NOT_REACHED ();
+}
+*/
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -86,9 +202,11 @@ start_process (void *file_name_)
    This function will be implemented in problem 2-2.  For now, it
    does nothing. */
 int
-process_wait (tid_t child_tid UNUSED) 
+process_wait (tid_t child_tid) 
 {
-  return -1;
+  
+  struct thread * t = find_thread_using_tid(child_tid);
+  sema_down(&t->wait);
 }
 
 /* Free the current process's resources. */
@@ -114,6 +232,7 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  sema_up(&cur->wait);
 }
 
 /* Sets up the CPU for running user code in the current
@@ -220,7 +339,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
-
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL) 

@@ -4,7 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-
+#include "threads/synch.h"
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -92,6 +92,7 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    struct semaphore wait;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -155,5 +156,7 @@ bool thread_wake_up_tick_is_smaller(const struct list_elem *, const struct list_
 
 /* Depends which thread has bigger priority */
 bool thread_priority_is_bigger(const struct list_elem *, const struct list_elem *, void *);
+
+struct thread * find_thread_using_tid(tid_t input_tid);
 
 #endif /* threads/thread.h */
