@@ -140,7 +140,7 @@ start_process (void *file_name_)
   *(int *)if_.esp = 0;
 
 
-  hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+  //hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
 
 
   /* If load failed, quit. */
