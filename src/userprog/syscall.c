@@ -6,8 +6,18 @@
 #include "threads/vaddr.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
+#include "threads/synch.h"
 
 static void syscall_handler (struct intr_frame *);
+
+struct lock syscall_lock;
+
+void
+syscall_init (void) 
+{
+  lock_init(&syscall_lock);
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
 
 ///////////// helper functions to access user memory
 static int
@@ -54,13 +64,27 @@ our_halt(){
 
 void
 our_exit(int status){
+  //lock_acquire(&syscall_lock);
   printf("%s: exit(%d)\n", thread_current()->name, status);
+  thread_current()->exit_status = status;
   thread_exit();
+  //lock_release(&syscall_lock);
+}
+
+int
+our_wait(tid_t tid){
+  //lock_acquire(&syscall_lock);
+  int x = process_wait(tid);
+  //lock_release(&syscall_lock);
+  return x;
 }
 
 tid_t
 our_exec(const char *file){
-  return process_execute(file);
+  lock_acquire(&syscall_lock);
+  tid_t x = process_execute(file);
+  lock_release(&syscall_lock);
+  return x;
 }
 
 void
@@ -71,16 +95,9 @@ our_write(int fd, const void *buffer, unsigned size){
   //   put_user(fd, *((char *)buffer+cnt));
   //   cnt++;
   // }
+  lock_acquire(&syscall_lock);
   putbuf(buffer, size);
-}
-
-
-
-
-void
-syscall_init (void) 
-{
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  lock_release(&syscall_lock);
 }
 
 static void
@@ -92,28 +109,28 @@ syscall_handler (struct intr_frame *f UNUSED)
 
   int syscallnumber;
   ASSERT(get_user_many(f->esp, 4, &syscallnumber) != -1);
-  //printf("%d\n", syscallnumber);
+  printf("%d\n", syscallnumber);
   switch(syscallnumber){
-    case SYS_HALT:
+    case SYS_HALT: // 0
     {                   /* Halt the operating system. */
       our_halt();
       break;
     }
-    case SYS_EXIT:
+    case SYS_EXIT: // 1
     {                   /* Terminate this process. */
       int status;
       get_user_many(f->esp+4, 4, &status);             
       our_exit(status);
       break;
     }
-    case SYS_EXEC:
+    case SYS_EXEC: // 2
     {                   /* Start another process. */
       char *file;
-      get_user_many(f->esp+4, strlen(f->esp+4), file);
-      our_exec(file);
+      get_user_many(f->esp+4, strlen(f->esp+4)+1, &file);
+      f->eax = our_exec(file);
       break;
     }
-    case SYS_WRITE:
+    case SYS_WRITE: // 9
     {
       int fd;
       void *buffer;
@@ -122,6 +139,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       get_user_many(f->esp+8, 4, &buffer);
       get_user_many(f->esp+12, 4, &size);
       our_write(fd, buffer, size);
+      break;
+    }
+    case SYS_WAIT: // 3
+    {
+      //printf("fuck you\n");
+      tid_t tid;
+      get_user_many(f->esp+4, 4, &tid);
+      f->eax = our_wait(tid);
       break;
     }
     default:

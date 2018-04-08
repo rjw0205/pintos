@@ -48,8 +48,10 @@ process_execute (const char *file_name)
   }
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  find_thread_using_tid(tid)->parent_thread = thread_current();
   if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+    palloc_free_page (fn_copy);
+  //printf("!!! %s !!!\n", file_name);
   return tid;
 }
 /*
@@ -88,12 +90,11 @@ start_process (void *file_name_)
   char *parsed_command_storage[100];
   char *token, *save_ptr;
   int num = 0;
-
+  //printf("%s\n", file_name);
   for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
     parsed_command_storage[num] = token;
     num += 1;
   }
-
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -204,9 +205,23 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
-  
-  struct thread * t = find_thread_using_tid(child_tid);
+  struct thread *t = find_thread_using_tid(child_tid);
+  //printf("%s waiting for %s\n", thread_current()->name, t->name);
+  if(!t){
+    //printf("11\n");
+    return -1;
+  }
+  if(t->parent_thread->tid != thread_current()->tid){
+    //printf("22\n");
+    return -1;
+  }
+  //printf("44\n");
   sema_down(&t->wait);
+  //printf("33\n");  
+
+  int exit_status = t->exit_status;
+  thread_unblock(t);
+  return exit_status;
 }
 
 /* Free the current process's resources. */
@@ -215,7 +230,14 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+  enum intr_level old_level;
 
+  //printf("55\n");
+  sema_up(&cur->wait);
+
+  old_level = intr_disable ();
+  thread_block();
+  intr_set_level (old_level);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -232,7 +254,6 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  sema_up(&cur->wait);
 }
 
 /* Sets up the CPU for running user code in the current

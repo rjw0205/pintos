@@ -97,6 +97,10 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+
+    struct thread *parent_thread;
+    
+    int exit_status;
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */
