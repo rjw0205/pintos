@@ -7,6 +7,7 @@
 #include "userprog/process.h"
 #include "devices/shutdown.h"
 #include "threads/synch.h"
+#include "filesys/filesys.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -33,11 +34,11 @@ get_user(const uint8_t *uaddr){
 static int
 get_user_many(const uint8_t *start, int how_many, void *destination){
   int cnt;
+
   for(cnt=0; cnt<how_many; cnt++){
     int result = get_user(start+cnt);
     if(result == -1){
       our_exit(-1);
-      return -1;
     }
     *((char *)destination + cnt) = result;
   }
@@ -84,6 +85,8 @@ our_wait(tid_t tid){
 
 tid_t
 our_exec(const char *file){
+  //printf("fff\n");
+  //printf("%d!!\n", strlen(file));
   tid_t x = process_execute(file);
   return x;
 }
@@ -102,6 +105,20 @@ our_write(int fd, const void *buffer, unsigned size){
   }
   else
     return size;
+}
+
+bool
+our_create(const char *file, unsigned initial_size){
+  //lock_acquire(&syscall_lock);
+  bool success = filesys_create(file, initial_size);
+  //lock_release(&syscall_lock);
+  return success;
+}
+
+bool
+our_remove(const char *file){
+  bool success = filesys_remove(file);
+  return success;
 }
 
 static void
@@ -135,7 +152,14 @@ syscall_handler (struct intr_frame *f)
     {                   /* Start another process. */
       char *file;
       get_user_many(f->esp+4, 4, &file);
-      f->eax = (uint32_t)our_exec(file);
+
+      if(get_user(file) == -1){
+        our_exit(-1);
+      }
+      else{
+        f->eax = (uint32_t)our_exec(file);
+      }
+
       break;
     }
     case SYS_WRITE: // 9
@@ -146,7 +170,13 @@ syscall_handler (struct intr_frame *f)
       get_user_many(f->esp+4, 4, &fd);
       get_user_many(f->esp+8, 4, &buffer);
       get_user_many(f->esp+12, 4, &size);
-      f->eax = (uint32_t)our_write(fd, buffer, size);
+
+      if(get_user(buffer) == -1){
+        our_exit(-1);
+      }
+      else{
+        f->eax = (uint32_t)our_write(fd, buffer, size);
+      }
       break;
     }
     case SYS_WAIT: // 3
@@ -156,9 +186,34 @@ syscall_handler (struct intr_frame *f)
       f->eax = (uint32_t)our_wait(tid);
       break;
     }
+    case SYS_CREATE: // 4
+    {
+      char *file;
+      unsigned initial_size;
+      get_user_many(f->esp+4, 4, &file);
+      get_user_many(f->esp+8, 4, &initial_size);
+      if(get_user(file) == -1){
+        our_exit(-1);
+      }
+      else {
+        f->eax = our_create(file, initial_size);
+      }
+      break;
+    }
+    case SYS_REMOVE: // 5
+    {
+      char *file;
+      get_user_many(f->esp+4, 4, &file);
+      if(get_user(file) == -1){
+        our_exit(-1);
+      }
+      else {
+        f->eax = our_remove(file);
+      }
+      break;
+    }
     default:
       break;
-    //SYS_WAIT,                   /* Wait for a child process to die. */
     //SYS_CREATE,                 /* Create a file. */
     //SYS_REMOVE,                 /* Delete a file. */
     //SYS_OPEN,                   /* Open a file. */

@@ -92,8 +92,10 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+
     struct semaphore wait;
 
+    struct semaphore wait2;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -103,6 +105,10 @@ struct thread
     int exit_status;
 
     bool exit_once;
+
+    bool load_success;
+
+    struct semaphore wait_load;
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */

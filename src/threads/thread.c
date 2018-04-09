@@ -511,6 +511,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->priority_before_donation = priority;
   t->exit_once = true;
   sema_init(&t->wait, 0);
+  sema_init(&t->wait2, 0);
+  t->load_success = true;
+  sema_init(&t->wait_load, 0);
   list_init(&t->lock_list_which_thread_hold);
   list_init(&t->lock_which_thread_waiting);
   t->magic = THREAD_MAGIC;

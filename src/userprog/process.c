@@ -31,8 +31,6 @@ process_execute (const char *file_name)
   char *fn_copy;
   tid_t tid;
 
-  // file_name == 'echo x'
-
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page (0);
@@ -40,21 +38,29 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  char *token, *save_ptr;
+  char *file_name_, *token, *save_ptr;
+  file_name_ = palloc_get_page(0);
+  strlcpy(file_name_, file_name, PGSIZE);
 
-  for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
-    file_name = token;
+  for (token = strtok_r (file_name_, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+    file_name_ = token;
     break;
   }
   /* Create a new thread to execute FILE_NAME. */
-//  enum intr_level old_level;
-//  old_level = intr_disable ();
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  find_thread_using_tid(tid)->parent_thread = thread_current();
-//  intr_set_level (old_level);
-  if (tid == TID_ERROR)
+  tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
+
+
+  if (tid == TID_ERROR){
     palloc_free_page (fn_copy);
-  //printf("!!! %s !!!\n", file_name);
+  }
+  else {
+    sema_down(&find_thread_using_tid(tid)->wait_load);
+    if(find_thread_using_tid(tid)->load_success == false){
+      return -1;
+    }
+    find_thread_using_tid(tid)->parent_thread = thread_current();
+  }
+  palloc_free_page(file_name_);
   return tid;
 }
 
@@ -82,6 +88,12 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
+
+  if (!success){
+    thread_current()->load_success = false;
+  }
+
+  sema_up(&thread_current()->wait_load);
 
   int arg_add[num];
   int arg_len;
@@ -198,7 +210,7 @@ process_wait (tid_t child_tid)
   sema_down(&t->wait);  
   int exit_status = t->exit_status;
   t->exit_once = false;
-  sema_up(&t->parent_thread->wait);
+  sema_up(&t->wait2);
   return exit_status;
 }
 
@@ -212,7 +224,7 @@ process_exit (void)
   enum intr_level old_level;
   sema_up(&cur->wait);
   //old_level = intr_disable ();
-  sema_down(&cur->parent_thread->wait);
+  sema_down(&cur->wait2);
   //intr_set_level (old_level);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
