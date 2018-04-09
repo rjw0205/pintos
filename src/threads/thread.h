@@ -101,6 +101,8 @@ struct thread
     struct thread *parent_thread;
     
     int exit_status;
+
+    bool exit_once;
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */

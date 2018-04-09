@@ -47,36 +47,17 @@ process_execute (const char *file_name)
     break;
   }
   /* Create a new thread to execute FILE_NAME. */
+//  enum intr_level old_level;
+//  old_level = intr_disable ();
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   find_thread_using_tid(tid)->parent_thread = thread_current();
+//  intr_set_level (old_level);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
   //printf("!!! %s !!!\n", file_name);
   return tid;
 }
-/*
-process_execute (const char *file_name) 
-{
-  char *fn_copy;
-  tid_t tid;
 
-  // Make a copy of FILE_NAME.
-  //   Otherwise there's a race between the caller and load(). 
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
-
-  char * save_ptr;
-  file_name = strtok_r(file_name, " ", &save_ptr);
-
-  // Create a new thread to execute FILE_NAME. 
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
-  return tid;
-}*/
 
 /* A thread function that loads a user process and starts it
    running. */
@@ -146,7 +127,7 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success)
     thread_exit ();
 
   /* Start the user process by simulating a return from an
@@ -206,21 +187,18 @@ int
 process_wait (tid_t child_tid) 
 {
   struct thread *t = find_thread_using_tid(child_tid);
-  //printf("%s waiting for %s\n", thread_current()->name, t->name);
-  if(!t){
-    //printf("11\n");
+  if(t == NULL){
     return -1;
   }
   if(t->parent_thread->tid != thread_current()->tid){
-    //printf("22\n");
     return -1;
   }
-  //printf("44\n");
-  sema_down(&t->wait);
-  //printf("33\n");  
-
+  if(t->exit_once == false)
+    return -1;
+  sema_down(&t->wait);  
   int exit_status = t->exit_status;
-  thread_unblock(t);
+  t->exit_once = false;
+  sema_up(&t->parent_thread->wait);
   return exit_status;
 }
 
@@ -230,14 +208,12 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
   enum intr_level old_level;
-
-  //printf("55\n");
   sema_up(&cur->wait);
-
-  old_level = intr_disable ();
-  thread_block();
-  intr_set_level (old_level);
+  //old_level = intr_disable ();
+  sema_down(&cur->parent_thread->wait);
+  //intr_set_level (old_level);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

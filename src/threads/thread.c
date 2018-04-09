@@ -175,7 +175,6 @@ thread_create (const char *name, int priority,
   enum intr_level old_level;
 
   ASSERT (function != NULL);
-  //printf("CCC\n");
 
   /* Allocate thread. */
   t = palloc_get_page (PAL_ZERO);
@@ -208,11 +207,6 @@ thread_create (const char *name, int priority,
   sf->ebp = 0;
 
   intr_set_level (old_level);
-
-  sema_init(&t->wait, 0);
-#ifdef USERPROG
-    //t->wait = thread_current()->wait;                  
-#endif
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -255,6 +249,7 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered(&ready_list, &t->elem, thread_priority_is_bigger, NULL);
   t->status = THREAD_READY;
+  intr_set_level (old_level);
 
   if(idle_thread != thread_current()){
     if(t->priority > thread_current()->priority){
@@ -262,7 +257,7 @@ thread_unblock (struct thread *t)
     }
   }
 
-  intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -514,6 +509,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->priority_before_donation = priority;
+  t->exit_once = true;
+  sema_init(&t->wait, 0);
   list_init(&t->lock_list_which_thread_hold);
   list_init(&t->lock_which_thread_waiting);
   t->magic = THREAD_MAGIC;
