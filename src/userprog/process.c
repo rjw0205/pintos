@@ -17,9 +17,13 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "lib/kernel/list.h"
+#include "filesys/inode.h"
+#include "filesys/directory.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static struct list executables;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -225,6 +229,14 @@ process_exit (void)
   sema_up(&cur->wait);
   //old_level = intr_disable ();
   sema_down(&cur->wait2);
+
+/*  struct dir *dir = dir_open_root ();  
+  struct inode* inode = NULL;
+  if (dir != NULL)
+    dir_lookup (dir, cur->name, &inode);
+  dir_close (dir);
+  *(inode->deny_write_cnt)--;
+*/
   //intr_set_level (old_level);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -350,12 +362,13 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
   /* Open executable file. */
   file = filesys_open (file_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
-
+  //file->inode->deny_write_cnt++;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -439,6 +452,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
+  // if(!success)
+  //   if(file != NULL)
+  //     file->inode->deny_write_cnt--;
   file_close (file);
   return success;
 }

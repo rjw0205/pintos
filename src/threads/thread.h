@@ -109,6 +109,8 @@ struct thread
     bool load_success;
 
     struct semaphore wait_load;
+
+    struct list open_file_list;
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */

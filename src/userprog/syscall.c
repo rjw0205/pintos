@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
 #include "userprog/process.h"
 #include "devices/shutdown.h"
 #include "threads/synch.h"
@@ -11,12 +12,14 @@
 
 static void syscall_handler (struct intr_frame *);
 
-struct lock syscall_lock;
+static struct lock syscall_lock;
+static struct lock fd_lock;
 
 void
 syscall_init (void) 
 {
   lock_init(&syscall_lock);
+  lock_init(&fd_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -57,6 +60,47 @@ put_user (uint8_t *udst, uint8_t byte)
   return -1;
 }
 
+int
+allocate_fd (void) 
+{
+  static int next_fd = 2;
+  int fd;
+  lock_acquire (&fd_lock);
+  fd = next_fd++;
+  lock_release (&fd_lock);
+  return fd;
+}
+
+struct file *
+find_file_using_fd(int input_fd) {
+  struct list_elem *e;
+  struct thread * cur = thread_current();
+  for (e = list_begin (&cur->open_file_list); e != list_end (&cur->open_file_list);
+       e = list_next (e))
+    {
+      struct file_descriptor * f = list_entry (e, struct file_descriptor, elem);
+      if(f->fd == input_fd){
+        return f->file;
+      }
+    }
+    return NULL;
+}
+
+struct file_descriptor *
+find_descriptor_using_fd(int input_fd) {
+  struct list_elem *e;
+  struct thread * cur = thread_current();
+  for (e = list_begin (&cur->open_file_list); e != list_end (&cur->open_file_list);
+       e = list_next (e))
+    {
+      struct file_descriptor * f = list_entry (e, struct file_descriptor, elem);
+      if(f->fd == input_fd){
+        return f;
+      }
+    }
+    return NULL;
+}
+
 ///////////////////////////////////////////////////
 
 void
@@ -85,54 +129,150 @@ our_wait(tid_t tid){
 
 tid_t
 our_exec(const char *file){
-  //printf("fff\n");
-  //printf("%d!!\n", strlen(file));
+  lock_acquire(&syscall_lock);
   tid_t x = process_execute(file);
+  lock_release(&syscall_lock);
   return x;
-}
-
-int
-our_write(int fd, const void *buffer, unsigned size){
-  unsigned cnt = 0;
-  //printf("%x\n", buffer);
-  // while( is_user_vaddr((char *)buffer+cnt) && *((char *)buffer+cnt) != '\0' && cnt<size){
-  //   put_user(fd, *((char *)buffer+cnt));
-  //   cnt++;
-  // }
-  if (fd ==1){
-    putbuf(buffer,size);
-    return size;
-  }
-  else
-    return size;
 }
 
 bool
 our_create(const char *file, unsigned initial_size){
-  //lock_acquire(&syscall_lock);
+  lock_acquire(&syscall_lock);
   bool success = filesys_create(file, initial_size);
-  //lock_release(&syscall_lock);
+  lock_release(&syscall_lock);
   return success;
 }
 
 bool
 our_remove(const char *file){
+  lock_acquire(&syscall_lock);
   bool success = filesys_remove(file);
+  lock_release(&syscall_lock);
   return success;
+}
+
+int
+our_open(const char * file){
+  struct file * file_opened;
+  int fd;
+
+  struct file_descriptor * file_desc;
+  lock_acquire(&syscall_lock);
+  file_opened = filesys_open(file);
+  lock_release(&syscall_lock);
+  if (file_opened == NULL)
+    return -1;
+
+  file_desc = palloc_get_page(0);
+  if(file_desc == NULL)
+    our_exit(-1);
+  file_desc->fd = allocate_fd();
+  file_desc->file = file_opened;
+  list_push_front(&thread_current()->open_file_list, &file_desc->elem);
+  return file_desc->fd;
+}
+
+int
+our_filesize(int fd){
+  struct file * file_opened;
+  file_opened = find_file_using_fd(fd);
+  if (file_opened == NULL)
+    return -1;
+  else
+  {
+    int len;
+    lock_acquire(&syscall_lock);
+    len = file_length(file_opened);
+    lock_release(&syscall_lock);
+    return len;
+  }
+}
+
+int
+our_read(int fd, const void *buffer, unsigned size){
+  struct file * file_opened;
+  file_opened = find_file_using_fd(fd);
+  if (file_opened == NULL)
+    return -1;
+  int len;
+  lock_acquire(&syscall_lock);
+  len = file_read(file_opened, buffer, size);
+  lock_release(&syscall_lock);
+  return len;
+}
+
+int
+our_write(int fd, const void *buffer, unsigned size){
+  if (fd ==1){
+    putbuf(buffer,size);
+    return size;
+  }
+  else{
+    struct file * file_opened;
+    file_opened = find_file_using_fd(fd);
+    if (file_opened == NULL)
+      return -1;
+    int len;
+    lock_acquire(&syscall_lock);
+    len = file_write(file_opened, buffer, size);
+    lock_release(&syscall_lock);
+    return len;
+  }
+}
+
+void
+our_seek(int fd, unsigned position)
+{
+  struct file * file_opened;
+  file_opened = find_file_using_fd(fd);
+  if (file_opened == NULL)
+    our_exit(-1);
+  else
+  {
+    lock_acquire(&syscall_lock);
+    file_seek(file_opened,position);
+    lock_release(&syscall_lock);
+  }
+}
+unsigned
+our_tell(int fd)
+{
+  struct file * file_opened;
+  file_opened = find_file_using_fd(fd);
+  if (file_opened == NULL)
+    return -1;
+  else
+  {
+    int len;
+    lock_acquire(&syscall_lock);
+    len = file_tell(file_opened);
+    lock_release(&syscall_lock);
+    return len;
+  }
+}
+
+void
+our_close(int fd)
+{
+  struct file * file_opened;
+  struct file_descriptor * descriptor = find_descriptor_using_fd(fd);
+  file_opened = find_file_using_fd(fd);
+  if (file_opened == NULL)
+    our_exit(-1);
+  else
+  {
+    lock_acquire(&syscall_lock);
+    file_close(file_opened);
+    lock_release(&syscall_lock);
+    list_remove(&descriptor->elem);
+    palloc_free_page(descriptor);
+  }
 }
 
 static void
 syscall_handler (struct intr_frame *f) 
 {
-  // printf("%x\n",f->esp);
-  // printf ("system call!\n");
-  // thread_exit ();
-
   int syscallnumber;
-//  if (get_user_many(f->esp, 4, &syscallnumber) == -1){
-//    our_exit(-1);
-//    return;
-//  }
   get_user_many(f->esp, 4, &syscallnumber);
 
   switch(syscallnumber){
@@ -162,23 +302,6 @@ syscall_handler (struct intr_frame *f)
 
       break;
     }
-    case SYS_WRITE: // 9
-    {
-      int fd;
-      void *buffer;
-      unsigned size;
-      get_user_many(f->esp+4, 4, &fd);
-      get_user_many(f->esp+8, 4, &buffer);
-      get_user_many(f->esp+12, 4, &size);
-
-      if(get_user(buffer) == -1){
-        our_exit(-1);
-      }
-      else{
-        f->eax = (uint32_t)our_write(fd, buffer, size);
-      }
-      break;
-    }
     case SYS_WAIT: // 3
     {
       tid_t tid;
@@ -202,7 +325,7 @@ syscall_handler (struct intr_frame *f)
     }
     case SYS_REMOVE: // 5
     {
-      char *file;
+      const char *file;
       get_user_many(f->esp+4, 4, &file);
       if(get_user(file) == -1){
         our_exit(-1);
@@ -212,16 +335,87 @@ syscall_handler (struct intr_frame *f)
       }
       break;
     }
+    case SYS_OPEN: // 6
+    {
+      const char *file;
+      get_user_many(f->esp+4, 4, &file);
+      if(get_user(file) == -1){
+        our_exit(-1);
+      }
+      else {
+        f->eax = our_open(file);
+      }
+      break;
+    }
+    case SYS_FILESIZE: // 7
+    {
+      int fd;
+      get_user_many(f->esp+4, 4, &fd);
+      f->eax = our_filesize(fd);
+      break;
+    }
+    case SYS_READ:
+    {
+      int fd;
+      void *buffer;
+      unsigned size;
+      get_user_many(f->esp+4, 4, &fd);
+      get_user_many(f->esp+8, 4, &buffer);
+      get_user_many(f->esp+12, 4, &size);
+
+      if(get_user(buffer) == -1){
+        our_exit(-1);
+      }
+      else if(buffer == NULL)
+      {
+        our_exit(-1);
+      }
+      else{
+        f->eax = (uint32_t)our_read(fd, buffer, size);
+      }
+      break;      
+    }
+    case SYS_WRITE: // 9
+    {
+      int fd;
+      void *buffer;
+      unsigned size;
+      get_user_many(f->esp+4, 4, &fd);
+      get_user_many(f->esp+8, 4, &buffer);
+      get_user_many(f->esp+12, 4, &size);
+
+      if(get_user(buffer) == -1){
+        our_exit(-1);
+      }
+      else{
+        f->eax = our_write(fd, buffer, size);
+      }
+      break;
+    }
+    case SYS_SEEK:
+    {
+      int fd;
+      unsigned position;
+      get_user_many(f->esp+4, 4, &fd);
+      get_user_many(f->esp+8, 4, &position);
+      our_seek(fd, position);
+      break;
+    }
+    case SYS_TELL:
+    {
+      int fd;
+      get_user_many(f->esp+4, 4, &fd);
+      f->eax = our_tell(fd);
+      break;
+    }
+    case SYS_CLOSE:
+    {
+      int fd;
+      get_user_many(f->esp+4, 4, &fd);
+      our_close(fd);
+      break;
+    }
     default:
       break;
-    //SYS_CREATE,                 /* Create a file. */
-    //SYS_REMOVE,                 /* Delete a file. */
-    //SYS_OPEN,                   /* Open a file. */
-    //SYS_FILESIZE,               /* Obtain a file's size. */
-    //SYS_READ,                   /* Read from a file. */
-    //SYS_WRITE,                  /* Write to a file. */
-    //SYS_SEEK,                   /* Change position in a file. */
-    //SYS_TELL,                   /* Report current position in a file. */
-    //SYS_CLOSE, 
   }
 }

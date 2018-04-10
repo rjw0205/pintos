@@ -516,6 +516,7 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_init(&t->wait_load, 0);
   list_init(&t->lock_list_which_thread_hold);
   list_init(&t->lock_which_thread_waiting);
+  list_init(&t->open_file_list);
   t->magic = THREAD_MAGIC;
   list_push_back (&all_list, &t->allelem);
 }
