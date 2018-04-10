@@ -23,7 +23,6 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-static struct list executables;
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -44,6 +43,8 @@ process_execute (const char *file_name)
 
   char *file_name_, *token, *save_ptr;
   file_name_ = palloc_get_page(0);
+  if(file_name == NULL)
+    return TID_ERROR;
   strlcpy(file_name_, file_name, PGSIZE);
 
   for (token = strtok_r (file_name_, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
@@ -142,9 +143,9 @@ start_process (void *file_name_)
 
 
   /* If load failed, quit. */
-  palloc_free_page (file_name);
+  palloc_free_page (file_name_);
   if (!success)
-    thread_exit ();
+    our_exit (-1);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -230,13 +231,6 @@ process_exit (void)
   //old_level = intr_disable ();
   sema_down(&cur->wait2);
 
-/*  struct dir *dir = dir_open_root ();  
-  struct inode* inode = NULL;
-  if (dir != NULL)
-    dir_lookup (dir, cur->name, &inode);
-  dir_close (dir);
-  *(inode->deny_write_cnt)--;
-*/
   //intr_set_level (old_level);
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -362,13 +356,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
   /* Open executable file. */
   file = filesys_open (file_name);
-
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
-  //file->inode->deny_write_cnt++;
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
@@ -452,10 +444,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  // if(!success)
-  //   if(file != NULL)
-  //     file->inode->deny_write_cnt--;
-  file_close (file);
+  if(success){
+    file_deny_write(file);
+    thread_current()->exec_file = file;
+  }
+  else
+    file_close (file);
   return success;
 }
 

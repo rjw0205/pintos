@@ -111,6 +111,8 @@ struct thread
     struct semaphore wait_load;
 
     struct list open_file_list;
+
+    struct file *exec_file; 
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */

@@ -15,6 +15,7 @@ static void syscall_handler (struct intr_frame *);
 static struct lock syscall_lock;
 static struct lock fd_lock;
 
+
 void
 syscall_init (void) 
 {
@@ -112,9 +113,14 @@ void
 our_exit(int status){
 
   printf("%s: exit(%d)\n", thread_current()->name, status);
-//  lock_acquire(&syscall_lock);
+  lock_acquire(&syscall_lock);
+  if(thread_current()->exec_file != NULL){
+    file_close(thread_current()->exec_file);
+  }
+  lock_release(&syscall_lock);
   thread_current()->exit_status = status;
-//  lock_release(&syscall_lock);
+  if(lock_held_by_current_thread(&syscall_lock))
+    lock_release(&syscall_lock);
   thread_exit();
 
 }
@@ -155,14 +161,12 @@ int
 our_open(const char * file){
   struct file * file_opened;
   int fd;
-
   struct file_descriptor * file_desc;
   lock_acquire(&syscall_lock);
   file_opened = filesys_open(file);
   lock_release(&syscall_lock);
   if (file_opened == NULL)
     return -1;
-
   file_desc = palloc_get_page(0);
   if(file_desc == NULL)
     our_exit(-1);
