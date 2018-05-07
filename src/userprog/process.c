@@ -1,3 +1,4 @@
+#include "vm/frame.h"
 #include "userprog/process.h"
 #include <debug.h>
 #include <inttypes.h>
@@ -20,6 +21,8 @@
 #include "lib/kernel/list.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "userprog/syscall.h"
+
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -36,31 +39,36 @@ process_execute (const char *file_name)
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
+
   fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
+  if (fn_copy == NULL){
     return TID_ERROR;
+  }
   strlcpy (fn_copy, file_name, PGSIZE);
 
   char *file_name_, *token, *save_ptr;
   file_name_ = palloc_get_page(0);
-  if(file_name == NULL)
+  if(file_name_ == NULL){
+    palloc_free_page(fn_copy);
     return TID_ERROR;
+  }
   strlcpy(file_name_, file_name, PGSIZE);
 
   for (token = strtok_r (file_name_, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
     file_name_ = token;
     break;
   }
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (token, PRI_DEFAULT, start_process, fn_copy);
-
-
   if (tid == TID_ERROR){
     palloc_free_page (fn_copy);
   }
   else {
+    struct thread * new = find_thread_using_tid(tid);
     sema_down(&find_thread_using_tid(tid)->wait_load);
-    if(find_thread_using_tid(tid)->load_success == false){
+    if(new->load_success == false){
+      palloc_free_page(file_name_);
       return -1;
     }
     find_thread_using_tid(tid)->parent_thread = thread_current();
@@ -82,7 +90,7 @@ start_process (void *file_name_)
   char *parsed_command_storage[100];
   char *token, *save_ptr;
   int num = 0;
-  //printf("%s\n", file_name);
+  supplement_page_table_init();
   for (token = strtok_r (file_name, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
     parsed_command_storage[num] = token;
     num += 1;
@@ -99,6 +107,12 @@ start_process (void *file_name_)
   }
 
   sema_up(&thread_current()->wait_load);
+
+  if (!success){
+    palloc_free_page (file_name_);
+    our_exit (-1);
+  }
+
 
   int arg_add[num];
   int arg_len;
@@ -144,8 +158,6 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name_);
-  if (!success)
-    our_exit (-1);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -156,41 +168,7 @@ start_process (void *file_name_)
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
 }
-/*start_process (void *file_name_)
-{
-  char *file_name = file_name_;
-  struct intr_frame if_;
-  bool success;
 
-  char *token, *save_ptr;
-  char *arg_list[100];
-  int i=0;
-
-  for (token = strtok_r (file_name_, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr))
-    arg_list[i++] = token;
-
-  // Initialize interrupt frame and load executable. 
-  memset (&if_, 0, sizeof if_);
-  if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
-  if_.cs = SEL_UCSEG;
-  if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
-
-  // If load failed, quit. 
-  palloc_free_page (file_name);
-  if (!success) 
-    thread_exit ();
-
-  // Start the user process by simulating a return from an
-  //   interrupt, implemented by intr_exit (in
-  //   threads/intr-stubs.S).  Because intr_exit takes all of its
-  //   arguments on the stack in the form of a `struct intr_frame',
-  //   we just point the stack pointer (%esp) to our stack frame
-  //   and jump to it. 
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
-}
-*/
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -203,6 +181,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid) 
 {
+  
   struct thread *t = find_thread_using_tid(child_tid);
   if(t == NULL){
     return -1;
@@ -212,7 +191,7 @@ process_wait (tid_t child_tid)
   }
   if(t->exit_once == false)
     return -1;
-  sema_down(&t->wait);  
+  sema_down(&t->wait);
   int exit_status = t->exit_status;
   t->exit_once = false;
   sema_up(&t->wait2);
@@ -223,17 +202,38 @@ process_wait (tid_t child_tid)
 void
 process_exit (void)
 {
-  struct thread *cur = thread_current ();
+  struct thread * cur = thread_current ();
   uint32_t *pd;
-
-  enum intr_level old_level;
+  struct list_elem * e = list_end(&cur->open_file_list);
+  while(!list_empty(&cur->open_file_list)){
+    e = list_begin(&cur->open_file_list);
+    struct file_descriptor * f = list_entry (e, struct file_descriptor, elem);
+    our_close(f->fd);
+  }
   sema_up(&cur->wait);
-  //old_level = intr_disable ();
   sema_down(&cur->wait2);
 
+
+/*  while(e != e3){
+    e= list_next(e2); 
+    struct file_descriptor * f = list_entry (e2, struct file_descriptor, elem);
+    //old_level = intr_disable ();
+    printf("%d\n", f->fd);
+    our_close(f->fd);
+    e2 = e;
+  }*/
   //intr_set_level (old_level);
+/*  for (e = list_begin (&cur->open_file_list); e != list_end (&cur->open_file_list);
+       e = list_next (e))
+    {
+      struct file_descriptor * f = list_entry (e, struct file_descriptor, elem);
+      our_close(f->fd);
+    }*/
+    
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
+  supplement_page_table_destroy();  
+
   pd = cur->pagedir;
   if (pd != NULL) 
     {
@@ -356,6 +356,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
   /* Open executable file. */
   file = filesys_open (file_name);
+
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
@@ -455,8 +456,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
-
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
@@ -527,21 +526,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   file_seek (file, ofs);
   while (read_bytes > 0 || zero_bytes > 0) 
     {
-      /* Calculate how to fill this page.
-         We will read PAGE_READ_BYTES bytes from FILE
-         and zero the final PAGE_ZERO_BYTES bytes. */
+       /* Calculate how to fill this page.
+          We will read PAGE_READ_BYTES bytes from FILE
+          and zero the final PAGE_ZERO_BYTES bytes. */
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
-
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t *kpage = frame_alloc (PAL_USER);
       if (kpage == NULL)
         return false;
 
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
+          frame_table_entry_free (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -549,15 +547,26 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          palloc_free_page (kpage);
+          frame_table_entry_free (kpage);
           return false; 
         }
+      if(!supplement_page_table_insert(upage, 1 ,file, ofs, read_bytes, zero_bytes, writable))
+        return false;
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
+      ofs += page_read_bytes;
       upage += PGSIZE;
     }
+      // if(!supplement_page_table_insert(upage, 1 ,file, ofs, read_bytes, zero_bytes, writable))
+      //   return false;
+
+      // /* Advance. */
+      // read_bytes -= page_read_bytes;
+      // zero_bytes -= page_zero_bytes;
+      // ofs += page_read_bytes;
+      // upage += PGSIZE;
   return true;
 }
 
@@ -569,14 +578,14 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  kpage = frame_alloc (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page (kpage);
+        frame_table_entry_free (kpage);
     }
   return success;
 }
@@ -590,7 +599,7 @@ setup_stack (void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails. */
-static bool
+bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();

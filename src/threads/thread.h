@@ -5,6 +5,8 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "filesys/filesys.h"
+#include "lib/kernel/hash.h"
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -111,8 +113,11 @@ struct thread
     struct semaphore wait_load;
 
     struct list open_file_list;
+    struct file * exec_file;
+#endif
 
-    struct file *exec_file; 
+#ifdef VM
+    struct hash supplement_page_table;
 #endif
 
     /* Used in devices/timer.c -> timer_sleep() */

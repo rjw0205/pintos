@@ -111,18 +111,18 @@ our_halt(){
 
 void
 our_exit(int status){
+  if(lock_held_by_current_thread(&syscall_lock))
+    lock_release(&syscall_lock);
 
   printf("%s: exit(%d)\n", thread_current()->name, status);
+
   lock_acquire(&syscall_lock);
   if(thread_current()->exec_file != NULL){
     file_close(thread_current()->exec_file);
   }
-  lock_release(&syscall_lock);
   thread_current()->exit_status = status;
-  if(lock_held_by_current_thread(&syscall_lock))
-    lock_release(&syscall_lock);
+  lock_release(&syscall_lock);
   thread_exit();
-
 }
 
 int
@@ -164,15 +164,19 @@ our_open(const char * file){
   struct file_descriptor * file_desc;
   lock_acquire(&syscall_lock);
   file_opened = filesys_open(file);
-  lock_release(&syscall_lock);
-  if (file_opened == NULL)
+  if (file_opened == NULL){
+    lock_release(&syscall_lock);
     return -1;
+  }
   file_desc = palloc_get_page(0);
-  if(file_desc == NULL)
-    our_exit(-1);
+  if(file_desc == NULL){
+    lock_release(&syscall_lock);
+    return -1;
+  }
   file_desc->fd = allocate_fd();
   file_desc->file = file_opened;
   list_push_front(&thread_current()->open_file_list, &file_desc->elem);
+  lock_release(&syscall_lock);
   return file_desc->fd;
 }
 
@@ -267,9 +271,9 @@ our_close(int fd)
   {
     lock_acquire(&syscall_lock);
     file_close(file_opened);
-    lock_release(&syscall_lock);
     list_remove(&descriptor->elem);
     palloc_free_page(descriptor);
+    lock_release(&syscall_lock);
   }
 }
 
@@ -296,7 +300,6 @@ syscall_handler (struct intr_frame *f)
     {                   /* Start another process. */
       char *file;
       get_user_many(f->esp+4, 4, &file);
-
       if(get_user(file) == -1){
         our_exit(-1);
       }
@@ -366,7 +369,6 @@ syscall_handler (struct intr_frame *f)
       get_user_many(f->esp+4, 4, &fd);
       get_user_many(f->esp+8, 4, &buffer);
       get_user_many(f->esp+12, 4, &size);
-
       if(get_user(buffer) == -1){
         our_exit(-1);
       }

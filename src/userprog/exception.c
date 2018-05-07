@@ -5,6 +5,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "userprog/syscall.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -149,11 +150,16 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  if(load_from_supplement_page_table(fault_addr)){
+    return;
+  }
+
   if(user == false){
     f->eip = (void *)f->eax;
     f->eax = 0xffffffff;
     return;
   }
+
 #ifdef USERPROG
     our_exit(-1);
 #endif
